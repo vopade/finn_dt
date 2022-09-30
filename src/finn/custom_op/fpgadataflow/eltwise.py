@@ -165,29 +165,34 @@ class StreamingEltwise(HLSCustomOp):
         op = self.get_nodeattr("eltwiseOp")
         idt0 = self.get_input_datatype(0)
         idt1 = self.get_input_datatype(1)
-        assert idt0.signed() == idt1.signed(), (
-            "%s: Inputs must have same signedness" % self.onnx_node.name
-        )
-        idt0_min, idt0_max = idt0.min(), idt0.max()
-        idt1_min, idt1_max = idt1.min(), idt1.max()
-        cands = [
-            idt0_min - idt1_min,
-            idt0_min - idt1_max,
-            idt0_max - idt1_min,
-            idt0_max - idt1_max,
-        ]
-        largest_magnitude = max(map(abs, cands))
-        if op == "Add":
-            if idt0.signed():
-                return DataType.get_smallest_possible(idt0.min() + idt1.min())
-            else:
-                return DataType.get_smallest_possible(idt0.max() + idt1.max())
-        elif op == "Sub":
-            return DataType.get_smallest_possible(-largest_magnitude)
-        elif op == "AbsDiff":
-            return DataType.get_smallest_possible(largest_magnitude)
+        if (not idt0.is_integer()) or (not idt1.is_integer()):
+            return DataType["FLOAT32"]
         else:
-            raise Exception("%s: Unknown eltWiseOp = %s" % (self.onnx_node.name, op))
+            assert idt0.signed() == idt1.signed(), (
+                "%s: Inputs must have same signedness" % self.onnx_node.name
+            )
+            idt0_min, idt0_max = idt0.min(), idt0.max()
+            idt1_min, idt1_max = idt1.min(), idt1.max()
+            cands = [
+                idt0_min - idt1_min,
+                idt0_min - idt1_max,
+                idt0_max - idt1_min,
+                idt0_max - idt1_max,
+            ]
+            largest_magnitude = max(map(abs, cands))
+            if op == "Add":
+                if idt0.signed():
+                    return DataType.get_smallest_possible(idt0.min() + idt1.min())
+                else:
+                    return DataType.get_smallest_possible(idt0.max() + idt1.max())
+            elif op == "Sub":
+                return DataType.get_smallest_possible(-largest_magnitude)
+            elif op == "AbsDiff":
+                return DataType.get_smallest_possible(largest_magnitude)
+            else:
+                raise Exception(
+                    "%s: Unknown eltWiseOp = %s" % (self.onnx_node.name, op)
+                )
 
     def get_instream_width(self, ind=0):
         """Returns input stream width."""
@@ -379,9 +384,9 @@ class StreamingEltwise(HLSCustomOp):
         elem_hls_type_0 = idt0.get_hls_datatype_str()
         elem_hls_type_1 = idt1.get_hls_datatype_str()
         out_hls_type = odt.get_hls_datatype_str()
-        slice_in0 = "Slice<%s>" % elem_hls_type_0
-        slice_in1 = "Slice<%s>" % elem_hls_type_1
-        slice_out = "Slice<%s>" % out_hls_type
+        slice_in0 = "Slice<%s,%d>" % (elem_hls_type_0, idt0.bitwidth())
+        slice_in1 = "Slice<%s,%d>" % (elem_hls_type_1, idt1.bitwidth())
+        slice_out = "Slice<%s,%d>" % (out_hls_type, odt.bitwidth())
         eltwise_op_str = self.get_eltwise_op_lambda()
         "%sEltwiseFunction<%s, %s, %s>()" % (
             op,
@@ -460,3 +465,11 @@ class StreamingEltwise(HLSCustomOp):
         swidth = self.get_instream_width_padded()
         intf_names["s_axis"] = [(x + "_" + sname, swidth) for x in ["in0", "in1"]]
         return intf_names
+
+    def get_ap_int_max_w(self):
+        idt0 = DataType[self.get_nodeattr("inputDataType0")]
+        idt1 = DataType[self.get_nodeattr("inputDataType1")]
+        if (not idt0.is_integer()) or (not idt1.is_integer()):
+            return 4096
+        else:
+            return super().get_ap_int_max_w()
