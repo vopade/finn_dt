@@ -1699,7 +1699,7 @@ class InferStreamingEltwise(Transformation):
 
                 # skip conversion for layers with float input
                 if not (idt0.is_integer() and idt1.is_integer()):
-                    continue
+                    warnings.warn("Experimental non-int StreamingEltwise")
 
                 eltwiseOp = "Sub"
                 nodes_to_remove = [node]
