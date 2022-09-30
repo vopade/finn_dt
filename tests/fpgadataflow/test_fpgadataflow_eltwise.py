@@ -81,7 +81,9 @@ def build_model(shp, dt0, dt1, do_abs):
 
 
 # input datatype for one operand
-@pytest.mark.parametrize("dt0", [DataType["UINT4"], DataType["UINT7"]])
+@pytest.mark.parametrize(
+    "dt0", [DataType["FLOAT32"], DataType["UINT4"], DataType["UINT7"]]
+)
 # channels
 @pytest.mark.parametrize("ch", [1, 64])
 # folding
@@ -99,6 +101,8 @@ def test_fpgadataflow_eltwise(dt0, ch, fold, do_abs, exec_mode):
         pe = max(1, ch // fold)
     assert ch % pe == 0
     dt1 = DataType["UINT8"]
+    if dt0 == DataType["FLOAT32"]:
+        dt1 = dt0
     shp = [1, 4, 2, ch]
     model = build_model(shp, dt0, dt1, do_abs)
     in0 = gen_finn_dt_tensor(dt0, shp)
