@@ -124,13 +124,23 @@ class Thresholding_Bin_Search(HLSCustomOp):
         return None
 
     def get_instream_width(self):
-        return 0
+        i_bits = self.get_input_datatype().bitwidth()
+        return i_bits * self.get_nodeattr("PE")
 
     def get_outstream_width(self):
-        return 0
+        o_bits = self.get_output_datatype().bitwidth()
+        return o_bits * self.get_nodeattr("PE")
 
     def get_weightstream_width(self):
-        return 0
+        """Returns weight stream width. Used only in decoupled mode."""
+        if self.get_nodeattr("mem_mode") == "decoupled":
+            pe = self.get_nodeattr("PE")
+            wp = self.get_weight_datatype().bitwidth()
+            n_thres_steps = self.get_nodeattr("numSteps")
+            w_width = pe * wp * n_thres_steps
+            return w_width
+        else:
+            return 0
 
     def get_folded_input_shape(self):
         fold = self.calc_tmem()
