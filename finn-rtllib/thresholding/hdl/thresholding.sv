@@ -43,10 +43,10 @@
  *  threshold configuration relies on a channel address prefix. Inputs are
  *  accompanied by a channel selector.
  *****************************************************************************/
-module thresholding #(
-	int unsigned  N,  // output precision
-	int unsigned  M,  // input/threshold precision
-	int unsigned  C,  // number of channels
+module $MODULE_NAME$ #(
+	int unsigned  N = $N$,  // output precision
+	int unsigned  M = $M$,  // input/threshold precision
+	int unsigned  C = $C$,  // number of channels
 
 	localparam int unsigned  C_BITS = C < 2? 1 : $clog2(C)
 )(
@@ -85,12 +85,12 @@ module thresholding #(
 
 	// Stages: 0, 1, ..., N-1
 	uwire [0:N-1]  tws = (twa[N-1:0]+1) & ~twa[N-1:0];   // Write Select per stage by address suffix
-	for(genvar  stage = 0; stage < N; stage++) begin : genStages
 
+	for(genvar  stage = 0; stage < N; stage++) begin : genStages
 		// Threshold Memory
 		uwire [M-1:0]  thresh;
-		if(1) begin : blkUpdate
 
+		if(1) begin : blkUpdate
 			// Write control: local select from global address
 			uwire  we = twe && tws[stage];
 			if((C == 1) && (stage == 0)) begin
@@ -105,6 +105,7 @@ module thresholding #(
 				logic [M-1:0]  Threshs[C * 2**stage];
 				uwire [$clog2(C)+stage-1:0]  wa = twa[$left(twa):N-stage];
 				uwire [$clog2(C)+stage-1:0]  ra;
+
 				if(C > 1)  assign  ra[stage+:C_BITS] = pipe[stage].cnl;
 				if(stage)  assign  ra[stage-1:0]     = pipe[stage].res[0:stage-1];
 
@@ -150,4 +151,4 @@ module thresholding #(
 	assign	ocnl = pipe[N].cnl;
 	assign	odat = pipe[N].res;
 
-endmodule : thresholding
+endmodule : $MODULE_NAME$

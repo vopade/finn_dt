@@ -32,10 +32,10 @@
  * @author	Thomas B. Preußer <tpreusse@amd.com>
  *****************************************************************************/
 
-module thresholding_axi #(
-	int unsigned  N,	// output precision
-	int unsigned  M,	// input/threshold precision
-	int unsigned  C		// Channels
+module $MODULE_NAME_AXI$ #(
+	int unsigned  N = $N$,	// output precision
+	int unsigned  M = $M$,	// input/threshold precision
+	int unsigned  C = $C$		// Channels
 )(
 	//- Global Control ------------------
 	input	logic  ap_clk,
@@ -187,7 +187,7 @@ module thresholding_axi #(
 	end
 
 	// Core Thresholding Module
-	thresholding #(.N(N), .M(M), .C(C)) core (
+	$MODULE_NAME$ #(.N(N), .M(M), .C(C)) core (
 		.clk, .rst,
 		.twe, .twa, .twd,
 		.en,
@@ -195,4 +195,4 @@ module thresholding_axi #(
 		.ovld, .ocnl(), .odat
 	);
 
-endmodule : thresholding_axi
+endmodule : $MODULE_NAME_AXI$
