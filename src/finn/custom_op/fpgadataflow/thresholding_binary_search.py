@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import os
 from qonnx.core.datatype import DataType
 
 from finn.custom_op.fpgadataflow.hlscustomop import HLSCustomOp
@@ -173,6 +174,97 @@ class Thresholding_Bin_Search(HLSCustomOp):
         * weight_file_name : filename for the weight file to be generated
         """
         return
+
+    # Get the integer from the DataType and string-ify it
+    # This assumes that the data is in the form "INTx" or similar
+    def conv_datatype_to_str(self, data_type):
+        # Handle the case that an int is passed to the function
+        if isinstance(data_type, int):
+            return str(data_type)
+        return str(DataType[data_type].bitwidth())
+
+    def prepare_codegen_rtl_values(self):
+        code_gen_dict = {}
+
+        # Identify the module names
+        code_gen_dict["$MODULE_NAME$"] = [self.get_verilog_top_module_name()]
+        code_gen_dict["$MODULE_NAME_AXI$"] = [self.get_verilog_top_module_name() + "_axi"]
+        code_gen_dict["$MODULE_NAME_AXI_WRAPPER$"] = [self.get_verilog_top_module_name() + "_axi_wrapper"]
+        # The AXI wrapper is the top module:
+        code_gen_dict["$TOP_MODULE$"] = code_gen_dict["$MODULE_NAME_AXI_WRAPPER$"]
+
+        # Identify the module variables
+        output_data_type = self.get_nodeattr("outputDataType") # output precision
+        input_data_type = self.get_nodeattr("weightDataType") # input/threshold precision
+        num_channels = self.get_nodeattr("NumChannels") # number of channels
+
+        code_gen_dict["$N$"] = [self.conv_datatype_to_str(output_data_type)] # output precision
+        code_gen_dict["$M$"] = [self.conv_datatype_to_str(input_data_type)] # input/threshold precision
+        code_gen_dict["$C$"] = [self.conv_datatype_to_str(num_channels)] # number of channels
+
+        return code_gen_dict
+
+    def get_rtl_file_list(self):
+        return ["thresholding.sv",
+                "thresholding_axi.sv",
+                "thresholding_axi_wrapper.v"]
+
+    def get_rtl_file_paths(self):
+        rtl_root_dir = os.environ["FINN_ROOT"] + "/finn-rtllib/thresholding/hdl/"
+        rtl_file_list = self.get_rtl_file_list()
+        rtl_file_paths = [rtl_root_dir + x for x in rtl_file_list]
+        return rtl_file_paths
+
+    def get_rtl_template_data(self, path):
+        with open(path, "r") as f:
+            template = f.read()
+        return template
+
+    def fill_in_rtl_template_data(self, replace_dict, template_data):
+        template_data_cp = template_data
+        for key in replace_dict:
+            # transform list into long string separated by '\n'
+            replacement_line = "\n".join(replace_dict[key])
+            template_data_cp = template_data_cp.replace(key, replacement_line)
+        return template_data_cp
+
+    def dump_rtl_data(self, dest_dir, filename, data):
+        with open(os.path.join(dest_dir, filename), "w") as f:
+            f.write(data)
+        return
+
+    def generate_hdl(self):
+        # Generate a dictionary of values to put in RTL schema
+        code_gen_dict = self.prepare_codegen_rtl_values()
+
+        # Retrieve the destination directory for the final RTL files
+        code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
+
+        for rtl_file_path in self.get_rtl_file_paths():
+            # read in original file
+            template_data = self.get_rtl_template_data(rtl_file_path)
+            # apply code generation to templates
+            data = self.fill_in_rtl_template_data(code_gen_dict, template_data)
+            # dump to dest dir
+            file_only_path = rtl_file_path.split('/')[-1]
+            self.dump_rtl_data(code_gen_dir, file_only_path, data)
+
+        self.set_nodeattr("gen_top_module", code_gen_dict["$TOP_MODULE$"][0])
+        return
+
+    def code_generation_ipgen(self, model, fpgapart, clk):
+        # Take RTL templates and fill in appropriate values
+        self.generate_hdl()
+
+        # Generate params for RTLSim
+        code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
+        self.generate_params(model, code_gen_dir)
+
+        # set ipgen_path and ip_path so that HLS-Synth transformation
+        # and stich_ip transformation do not complain
+        # i.e. during the HLSSynthIP() transformation
+        self.set_nodeattr("ipgen_path", code_gen_dir)
+        self.set_nodeattr("ip_path", code_gen_dir)
 
     def generate_params(self, model, path):
         return
