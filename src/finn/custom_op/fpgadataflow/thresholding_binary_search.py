@@ -318,6 +318,28 @@ class Thresholding_Bin_Search(HLSCustomOp):
 
         return cmd
 
+    # Overload default HLSCustomOp implementation to add axilite control IF
+    # This rewrites the default pin names for the in/outputs for this IP
+    # needed for stitching IP together and for RTLSim
+    def get_verilog_top_module_intf_names(self):
+        """Return a dict of names of input and output interfaces.
+        The keys reflect the protocols each interface implements:
+        'clk', 'rst', 'm_axis', 's_axis', 'aximm', 'axilite'.
+        Values are lists of tuples (axis, aximm) or names (axilite):
+        'axis' tuples correspond to the list of node inputs in order,
+        each tuple is (interface_name, interface_width_bits).
+        axilite always assumed to be 32 bits and is not tuple (name only).
+        Each block must have at most one aximm and one axilite."""
+
+        intf_names = super().get_verilog_top_module_intf_names()
+        intf_names["s_axis"] = [["s_axis"]]
+        intf_names["m_axis"] = [["m_axis"]]
+
+        mem_mode = self.get_nodeattr("mem_mode")
+        if mem_mode == "decoupled":
+            intf_names["axilite"] = ["s_axilite"]
+        return intf_names
+
     def global_includes(self):
         pass
 
