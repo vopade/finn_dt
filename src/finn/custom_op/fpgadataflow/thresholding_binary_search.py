@@ -273,7 +273,40 @@ class Thresholding_Bin_Search(HLSCustomOp):
         return
 
     def code_generation_ipi(self):
-        return []
+        """Constructs and returns the TCL for node instantiation in Vivado IPI."""
+        code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
+        rtl_file_list = self.get_rtl_file_list()
+
+        cmd = [
+            "add_files -norecurse %s"
+            % (
+                os.path.join(
+                    code_gen_dir, rtl_file_list[0]
+                )
+            ),
+            "add_files -norecurse %s"
+            % (
+                os.path.join(
+                    code_gen_dir, rtl_file_list[1]
+                )
+            ),
+            "add_files -norecurse %s"
+            % (
+                os.path.join(
+                    code_gen_dir, rtl_file_list[2]
+                )
+            ),
+            "create_bd_cell -type module -reference %s %s"
+            % (self.get_nodeattr("gen_top_module"), self.onnx_node.name),
+
+            # Fixme - these settings are temporary to prevent the following errors:
+            # ERROR: [BD 41-237] Bus Interface property FREQ_HZ does not match between /Thresholding_Binary_Search_0/s_axis(100000000) and /StreamingFIFO_0/out_V(200000000.000000)
+            # ERROR: [BD 41-237] Bus Interface property FREQ_HZ does not match between /StreamingFIFO_1/in0_V(200000000.000000) and /Thresholding_Binary_Search_0/m_axis(100000000)
+            "set_property -dict [list CONFIG.FREQ_HZ {200000000}] [get_bd_intf_pins Thresholding_Binary_Search_0/s_axis]",
+            "set_property -dict [list CONFIG.FREQ_HZ {200000000}] [get_bd_intf_pins Thresholding_Binary_Search_0/m_axis]",
+        ]
+
+        return cmd
 
     def global_includes(self):
         pass
