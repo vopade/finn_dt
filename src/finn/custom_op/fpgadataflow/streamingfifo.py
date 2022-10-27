@@ -133,80 +133,112 @@ class StreamingFIFO(HLSCustomOp):
         return prefixed_top_name
 
     def code_generation_ipgen(self, model, fpgapart, clk):
-        code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
-        verilog_dir = "{}/project_{}/sol1/impl/verilog".format(
-            code_gen_dir, self.onnx_node.name
-        )
-        os.makedirs(verilog_dir)
-        # copy Q_srl.v from finn-rtllib to verilog directory
-        memstream_dir = get_finn_root() + "/finn-rtllib/memstream/hdl/"
-        Q_file = os.path.join(memstream_dir, "Q_srl.v")
-        copy(Q_file, verilog_dir)
+        # node-by-node ipgen only possible with impl_style=rtl
+        # FIFOs with impl_style=vivado will be inserted during ip stitching
+        impl_style = self.get_nodeattr("impl_style")
+        if impl_style == "rtl":
+            code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
+            verilog_dir = "{}/project_{}/sol1/impl/verilog".format(
+                code_gen_dir, self.onnx_node.name
+            )
+            os.makedirs(verilog_dir)
+            # copy Q_srl.v from finn-rtllib to verilog directory
+            memstream_dir = get_finn_root() + "/finn-rtllib/memstream/hdl/"
+            Q_file = os.path.join(memstream_dir, "Q_srl.v")
+            copy(Q_file, verilog_dir)
 
-        # empty code gen dictionary for new entries
-        self.code_gen_dict.clear()
-        self.code_gen_dict["$TOPNAME$"] = ["{}".format(self.onnx_node.name)]
-        self.code_gen_dict["$LAYER_NAME$"] = [
-            "{}_{}".format(self.onnx_node.name, self.onnx_node.name)
-        ]
-        # make instream width a multiple of 8 for axi interface
-        in_width = self.get_instream_width_padded()
-        count_width = int(self.get_nodeattr("depth") - 1).bit_length()
-        self.code_gen_dict["$COUNT_RANGE$"] = ["[{}:0]".format(count_width - 1)]
-        self.code_gen_dict["$IN_RANGE$"] = ["[{}:0]".format(in_width - 1)]
-        self.code_gen_dict["$OUT_RANGE$"] = ["[{}:0]".format(in_width - 1)]
-        self.code_gen_dict["$WIDTH$"] = [str(in_width)]
-        self.code_gen_dict["$DEPTH$"] = [str(self.get_nodeattr("depth"))]
-        self.code_gen_dict["$HLS_SNAME$"] = [self.hls_sname()]
+            # empty code gen dictionary for new entries
+            self.code_gen_dict.clear()
+            self.code_gen_dict["$TOPNAME$"] = ["{}".format(self.onnx_node.name)]
+            self.code_gen_dict["$LAYER_NAME$"] = [
+                "{}_{}".format(self.onnx_node.name, self.onnx_node.name)
+            ]
+            # make instream width a multiple of 8 for axi interface
+            in_width = self.get_instream_width_padded()
+            count_width = int(self.get_nodeattr("depth") - 1).bit_length()
+            self.code_gen_dict["$COUNT_RANGE$"] = ["[{}:0]".format(count_width - 1)]
+            self.code_gen_dict["$IN_RANGE$"] = ["[{}:0]".format(in_width - 1)]
+            self.code_gen_dict["$OUT_RANGE$"] = ["[{}:0]".format(in_width - 1)]
+            self.code_gen_dict["$WIDTH$"] = [str(in_width)]
+            self.code_gen_dict["$DEPTH$"] = [str(self.get_nodeattr("depth"))]
+            self.code_gen_dict["$HLS_SNAME$"] = [self.hls_sname()]
 
-        template = self.strm_fifo_wrapper
+            template = self.strm_fifo_wrapper
 
-        for key in self.code_gen_dict:
-            # transform list into long string separated by '\n'
-            code_gen_line = "\n".join(self.code_gen_dict[key])
-            template = template.replace(key, code_gen_line)
-        f = open(os.path.join(verilog_dir, "{}.v".format(self.onnx_node.name)), "w")
-        f.write(template)
-        f.close()
-        self.code_gen_dict.clear()
+            for key in self.code_gen_dict:
+                # transform list into long string separated by '\n'
+                code_gen_line = "\n".join(self.code_gen_dict[key])
+                template = template.replace(key, code_gen_line)
+            f = open(os.path.join(verilog_dir, "{}.v".format(self.onnx_node.name)), "w")
+            f.write(template)
+            f.close()
+            self.code_gen_dict.clear()
+        elif impl_style == "vivado":
+            warnings.warn(
+                """FIFO impl_style set to vivado. There will be no ipgen for this node performed,
+                the insertion happens during ipstitching"""
+            )
+        else:
+            raise Exception(
+                """Invalid value for attribute impl_style! Is currently set to: {}
+                has to be set to one of the following value ("rtl", "vivado")""".format(
+                    impl_style
+                )
+            )
 
     def ipgen_singlenode_code(self):
-        code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
-        verilog_dir = "{}/project_{}/sol1/impl/verilog".format(
-            code_gen_dir, self.onnx_node.name
-        )
-        # prepare the IP packaging tcl template
-        template = templates.ip_package_tcl
-        self.code_gen_dict.clear()
-        self.code_gen_dict["$TOPNAME$"] = ["{}".format(self.onnx_node.name)]
-        # note: setting the root dir as absolute can cause path problems
-        # the ipgen script will be invoked from the sources dir so root_dir=. is OK
-        self.code_gen_dict["$VERILOG_DIR$"] = ["."]
-        self.code_gen_dict["$HLS_SNAME$"] = [self.hls_sname()]
-        for key in self.code_gen_dict:
-            # transform list into long string separated by '\n'
-            code_gen_line = "\n".join(self.code_gen_dict[key])
-            template = template.replace(key, code_gen_line)
-        f = open(os.path.join(verilog_dir, "package_ip.tcl"), "w")
-        f.write(template)
-        f.close()
-        # create a shell script and call Vivado to invoke the IP pkg script
-        make_project_sh = verilog_dir + "/make_ip.sh"
-        working_dir = os.environ["PWD"]
-        with open(make_project_sh, "w") as f:
-            f.write("#!/bin/bash \n")
-            f.write("cd {}\n".format(verilog_dir))
-            f.write("vivado -mode batch -source package_ip.tcl\n")
-            f.write("cd {}\n".format(working_dir))
-        bash_command = ["bash", make_project_sh]
-        process_compile = subprocess.Popen(bash_command, stdout=subprocess.PIPE)
-        process_compile.communicate()
-        # set ipgen_path and ip_path to point to the new packaged IP
-        self.set_nodeattr("ipgen_path", verilog_dir)
-        self.set_nodeattr("ip_path", verilog_dir)
-        vlnv = "xilinx.com:hls:%s:1.0" % (self.onnx_node.name)
-        self.set_nodeattr("ip_vlnv", vlnv)
-        self.code_gen_dict.clear()
+        # node-by-node ipgen only possible with impl_style=rtl
+        # FIFOs with impl_style=vivado will be inserted during ip stitching
+        impl_style = self.get_nodeattr("impl_style")
+        if impl_style == "rtl":
+            code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
+            verilog_dir = "{}/project_{}/sol1/impl/verilog".format(
+                code_gen_dir, self.onnx_node.name
+            )
+            # prepare the IP packaging tcl template
+            template = templates.ip_package_tcl
+            self.code_gen_dict.clear()
+            self.code_gen_dict["$TOPNAME$"] = ["{}".format(self.onnx_node.name)]
+            # note: setting the root dir as absolute can cause path problems
+            # the ipgen script will be invoked from the sources dir so root_dir=. is OK
+            self.code_gen_dict["$VERILOG_DIR$"] = ["."]
+            self.code_gen_dict["$HLS_SNAME$"] = [self.hls_sname()]
+            for key in self.code_gen_dict:
+                # transform list into long string separated by '\n'
+                code_gen_line = "\n".join(self.code_gen_dict[key])
+                template = template.replace(key, code_gen_line)
+            f = open(os.path.join(verilog_dir, "package_ip.tcl"), "w")
+            f.write(template)
+            f.close()
+            # create a shell script and call Vivado to invoke the IP pkg script
+            make_project_sh = verilog_dir + "/make_ip.sh"
+            working_dir = os.environ["PWD"]
+            with open(make_project_sh, "w") as f:
+                f.write("#!/bin/bash \n")
+                f.write("cd {}\n".format(verilog_dir))
+                f.write("vivado -mode batch -source package_ip.tcl\n")
+                f.write("cd {}\n".format(working_dir))
+            bash_command = ["bash", make_project_sh]
+            process_compile = subprocess.Popen(bash_command, stdout=subprocess.PIPE)
+            process_compile.communicate()
+            # set ipgen_path and ip_path to point to the new packaged IP
+            self.set_nodeattr("ipgen_path", verilog_dir)
+            self.set_nodeattr("ip_path", verilog_dir)
+            vlnv = "xilinx.com:hls:%s:1.0" % (self.onnx_node.name)
+            self.set_nodeattr("ip_vlnv", vlnv)
+            self.code_gen_dict.clear()
+        elif impl_style == "vivado":
+            warnings.warn(
+                """FIFO impl_style set to vivado. There will be no ipgen for this node performed,
+                the insertion happens during ipstitching"""
+            )
+        else:
+            raise Exception(
+                """Invalid value for attribute impl_style! Is currently set to: {}
+                has to be set to one of the following value ("rtl", "vivado")""".format(
+                    impl_style
+                )
+            )
 
     def get_normal_input_shape(self, ind=0):
         depth = self.get_adjusted_depth()
@@ -275,44 +307,56 @@ class StreamingFIFO(HLSCustomOp):
             output = np.asarray([output], dtype=np.float32).reshape(*exp_shape)
             context[node.output[0]] = output
         elif mode == "rtlsim":
-            code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
-            # create a npy file for the input of the node
-            assert (
-                str(inp.dtype) == "float32"
-            ), """Input datatype is
-                not float32 as expected."""
-            expected_inp_shape = self.get_folded_input_shape()
-            reshaped_input = inp.reshape(expected_inp_shape)
-            if DataType[self.get_nodeattr("dataType")] == DataType["BIPOLAR"]:
-                # store bipolar activations as binary
-                reshaped_input = (reshaped_input + 1) / 2
-                export_idt = DataType["BINARY"]
+            # node-by-node rtlsim only possible with impl_style=rtl
+            impl_style = self.get_nodeattr("impl_style")
+            if impl_style == "rtl":
+                code_gen_dir = self.get_nodeattr("code_gen_dir_ipgen")
+                # create a npy file for the input of the node
+                assert (
+                    str(inp.dtype) == "float32"
+                ), """Input datatype is
+                    not float32 as expected."""
+                expected_inp_shape = self.get_folded_input_shape()
+                reshaped_input = inp.reshape(expected_inp_shape)
+                if DataType[self.get_nodeattr("dataType")] == DataType["BIPOLAR"]:
+                    # store bipolar activations as binary
+                    reshaped_input = (reshaped_input + 1) / 2
+                    export_idt = DataType["BINARY"]
+                else:
+                    export_idt = DataType[self.get_nodeattr("dataType")]
+                # make copy before saving the array
+                reshaped_input = reshaped_input.copy()
+                np.save(os.path.join(code_gen_dir, "input_0.npy"), reshaped_input)
+                sim = self.get_rtlsim()
+                nbits = self.get_instream_width()
+                inp = npy_to_rtlsim_input(
+                    "{}/input_0.npy".format(code_gen_dir), export_idt, nbits
+                )
+                super().reset_rtlsim(sim)
+                super().toggle_clk(sim)
+                output = self.rtlsim(sim, inp)
+                odt = DataType[self.get_nodeattr("dataType")]
+                target_bits = odt.bitwidth()
+                packed_bits = self.get_outstream_width()
+                out_npy_path = "{}/output.npy".format(code_gen_dir)
+                out_shape = self.get_folded_output_shape()
+                rtlsim_output_to_npy(
+                    output, out_npy_path, odt, out_shape, packed_bits, target_bits
+                )
+                # load and reshape output
+                output = np.load(out_npy_path)
+                oshape = self.get_normal_output_shape()
+                output = np.asarray([output], dtype=np.float32).reshape(*oshape)
+                context[node.output[0]] = output
             else:
-                export_idt = DataType[self.get_nodeattr("dataType")]
-            # make copy before saving the array
-            reshaped_input = reshaped_input.copy()
-            np.save(os.path.join(code_gen_dir, "input_0.npy"), reshaped_input)
-            sim = self.get_rtlsim()
-            nbits = self.get_instream_width()
-            inp = npy_to_rtlsim_input(
-                "{}/input_0.npy".format(code_gen_dir), export_idt, nbits
-            )
-            super().reset_rtlsim(sim)
-            super().toggle_clk(sim)
-            output = self.rtlsim(sim, inp)
-            odt = DataType[self.get_nodeattr("dataType")]
-            target_bits = odt.bitwidth()
-            packed_bits = self.get_outstream_width()
-            out_npy_path = "{}/output.npy".format(code_gen_dir)
-            out_shape = self.get_folded_output_shape()
-            rtlsim_output_to_npy(
-                output, out_npy_path, odt, out_shape, packed_bits, target_bits
-            )
-            # load and reshape output
-            output = np.load(out_npy_path)
-            oshape = self.get_normal_output_shape()
-            output = np.asarray([output], dtype=np.float32).reshape(*oshape)
-            context[node.output[0]] = output
+                raise Exception(
+                    """Impl_style is currently set to: {}. For node-by-node rtlsim,
+                    impl_style needs to be set to "rtl". FIFOs with impl_style="vivado"
+                    will be inserted during ip stitching. Other values than "rtl"
+                    or "vivado" are invalid.""".format(
+                        impl_style
+                    )
+                )
 
         else:
             raise Exception(
